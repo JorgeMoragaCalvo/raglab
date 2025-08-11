@@ -6,8 +6,10 @@ from pathlib import Path
 
 import chromadb
 from chromadb.config import Settings
-from langchain_community.vectorstores import Chroma
+#from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain.schema import Document
+from langchain_community.vectorstores.utils import filter_complex_metadata
 
 import streamlit as st
 
@@ -24,14 +26,9 @@ class PersistenceManager:
 
         self.embedding_model = embedding_model
 
-        # Configurar ChromaDB client
-        self.chroma_client = chromadb.PersistentClient(
-            path=str(self.persist_directory),
-            settings=Settings(
-                anonymized_telemetry=False,
-                allow_reset=True
-            )
-        )
+        # DO NOT create ChromaDB client here to avoid conflicts
+        # Instead, we'll use only Langchain Chroma wrappers
+        self.chroma_client = None
 
     def _generate_collection_id(self, paper_data: Dict) -> str:
         """Genera un ID único para la colección basado en el paper"""
@@ -58,14 +55,6 @@ class PersistenceManager:
         try:
             # Generar ID único
             collection_id = self._generate_collection_id(paper_data)
-            ########## NEW CODE ##########
-            try:
-                existing_collection = self.chroma_client.get_collection(collection_id)
-                self.chroma_client.delete_collection(collection_id)
-                print(f"Deleted existing collection: {collection_id}")
-            except Exception:
-                pass
-            ########## END CODE ##########
             collection_name = f"paper_{collection_id}"
 
             # Verificar si ya existe
@@ -73,9 +62,12 @@ class PersistenceManager:
                 st.warning(f"Paper ya existe en la base de datos: {paper_data.get('title', 'Sin título')}")
                 return collection_id
 
+            # Filter complex metadata from documents before creating vectorstore
+            filtered_documents = filter_complex_metadata(documents)
+
             # Crear vectorstore con ChromaDB
             vectorstore = Chroma.from_documents(
-                documents=documents,
+                documents=filtered_documents,
                 embedding=self.embedding_model,
                 collection_name=collection_name,
                 persist_directory=str(self.persist_directory)
@@ -105,27 +97,10 @@ class PersistenceManager:
 
         except Exception as e:
             st.error(f"Error guardando vectorstore: {e}")
-            self.reset_chroma_instance()
             return ""
 
     ########## NEW CODE ##########
-    def reset_chroma_instance(self):
-        """Reset ChromaDB instance to avoid conflicts"""
-        try:
-            if hasattr(self, 'chroma_client') and self.chroma_client:
-                self.chroma_client.reset()
-        except Exception as e:
-            pass  # Ignore errors during reset
-
-        # Recreate client
-        self.chroma_client = chromadb.PersistentClient(
-            path=str(self.persist_directory),
-            settings=Settings(
-                anonymized_telemetry=False,
-                allow_reset=True
-            )
-        )
-    ########## END CODE ##########
+    # Reset method no longer needed since we don't use ChromaDB client directly
 
     def load_vectorstore(self, collection_id: str):
         """Carga un vectorstore existente"""
@@ -153,9 +128,9 @@ class PersistenceManager:
     def collection_exists(self, collection_id: str) -> bool:
         """Verifica si existe una colección"""
         try:
-            collection_name = f"paper_{collection_id}"
-            collections = self.chroma_client.list_collections()
-            return any(col.name == collection_name for col in collections)
+            # Check if metadata file exists (simpler and more reliable)
+            metadata_file = self.metadata_dir / f"{collection_id}.json"
+            return metadata_file.exists()
         except:
             return False
 
@@ -186,9 +161,16 @@ class PersistenceManager:
         try:
             collection_name = f"paper_{collection_id}"
 
-            # Eliminar colección de ChromaDB
+            # Try to delete collection using Langchain Chroma if it exists
             try:
-                self.chroma_client.delete_collection(collection_name)
+                if self.collection_exists(collection_id):
+                    # Create a temporary Chroma instance to delete the collection
+                    temp_chroma = Chroma(
+                        collection_name=collection_name,
+                        embedding_function=self.embedding_model,
+                        persist_directory=str(self.persist_directory)
+                    )
+                    temp_chroma.delete_collection()
             except Exception as e:
                 st.warning(f"Colección ya eliminada o no existe: {e}")
 
@@ -252,37 +234,32 @@ class PersistenceManager:
     def cleanup_orphaned_files(self):
         """Limpiar archivos huérfanos y colecciones sin metadata"""
         try:
-            # Obtener todas las colecciones en ChromaDB
-            collections = self.chroma_client.list_collections()
-            collection_names = {col.name for col in collections}
-
-            # Obtener todos los ID de metadata
-            metadata_ids = set()
+            # Since we're not using direct ChromaDB client, we'll focus on metadata cleanup
+            # This is a simplified cleanup that removes metadata files without corresponding collections
+            
+            st.info("🧹 Iniciando limpieza de archivos huérfanos...")
+            
+            # Clean up any temporary or invalid metadata files
+            cleaned_count = 0
             for metadata_file in self.metadata_dir.glob("*.json"):
-                collection_id = metadata_file.stem
-                metadata_ids.add(f"paper_{collection_id}")
-
-            # Eliminar colecciones sin metadata
-            orphaned_collections = collection_names - metadata_ids
-            for collection_name in orphaned_collections:
-                if collection_name.startswith('paper_'):
-                    try:
-                        self.chroma_client.delete_collection(collection_name)
-                        st.info(f"Eliminada colección huérfana: {collection_name}")
-                    except:
-                        pass
-
-            # Eliminar metadata sin colección
-            orphaned_metadata = metadata_ids - collection_names
-            for metadata_name in orphaned_metadata:
-                if metadata_name.startswith('paper_'):
-                    collection_id = metadata_name.replace('paper_', '')
-                    metadata_file = self.metadata_dir / f"{collection_id}.json"
-                    if metadata_file.exists():
+                try:
+                    with open(metadata_file, 'r', encoding='utf-8') as f:
+                        metadata = json.load(f)
+                    
+                    # Validate metadata structure
+                    required_fields = ['collection_id', 'collection_name', 'title']
+                    if not all(field in metadata for field in required_fields):
                         metadata_file.unlink()
-                        st.info(f"Eliminado metadata huérfano: {collection_id}")
+                        st.info(f"Eliminado metadata inválido: {metadata_file.name}")
+                        cleaned_count += 1
+                        
+                except Exception as e:
+                    # Remove corrupted metadata files
+                    metadata_file.unlink()
+                    st.info(f"Eliminado metadata corrupto: {metadata_file.name}")
+                    cleaned_count += 1
 
-            st.success("✅ Limpieza completada")
+            st.success(f"✅ Limpieza completada - {cleaned_count} archivos eliminados")
 
         except Exception as e:
             st.error(f"Error en limpieza: {e}")
