@@ -680,16 +680,15 @@ def load_persisted_vectorstore(collection_id: str, persistence_manager: Persiste
     return persistence_manager.load_vectorstore(collection_id)
 ##########  END NEW  ##########
 
-
 def display_paper_card(paper: Dict, source: str, searchers: Dict = None):
     """Muestra una tarjeta de paper"""
     with st.container():
         st.markdown('<div class="paper-card">', unsafe_allow_html=True)
 
-        # Título
+        # Title
         st.markdown(f"**{paper['title']}**")
 
-        # Autores
+        # Authors
         authors = paper.get('authors', [])
         if authors:
             authors_str = ', '.join(authors[:3])  # Mostrar solo primeros 3
@@ -697,7 +696,7 @@ def display_paper_card(paper: Dict, source: str, searchers: Dict = None):
                 authors_str += f" y {len(authors) - 3} más"
             st.markdown(f"*Autores:* {authors_str}")
 
-        # Año y venue/categoría
+        # Year and venue/category
         col1, col2, col3 = st.columns(3) # Add col3 and st.columns(3)
 
         paper_id = paper.get('id', hash(paper['title']))
@@ -739,7 +738,7 @@ def display_paper_card(paper: Dict, source: str, searchers: Dict = None):
         if abstract and abstract != 'No disponible':
             with st.expander("Ver Abstract"):
                 st.write(abstract[:500] + "..." if len(abstract) > 500 else abstract)
-        # Métricas (solo para Semantic Scholar)
+        # Metrics (for Semantic Scholar)
         if source == 'Semantic Scholar':
             col1, col2 = st.columns(2)
             with col1:
@@ -748,7 +747,7 @@ def display_paper_card(paper: Dict, source: str, searchers: Dict = None):
             with col2:
                 influential = paper.get('influential_citations', 0)
                 st.metric("Citas Influyentes", influential)
-        # Etiquetas
+        # Labels
         if source == 'arXiv':
             categories = paper.get('categories', [])
             if categories:
@@ -756,7 +755,7 @@ def display_paper_card(paper: Dict, source: str, searchers: Dict = None):
                 for cat in categories[:3]:  # Mostrar solo primeras 3
                     st.markdown(f'<span class="subject-tag">{cat}</span>', unsafe_allow_html=True)
 
-        # Botones de acción
+        # Action buttons
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button(f"📄 Procesar", key=f'process_{unique_key}'): # f"process_{paper.get('id', hash(paper['title']))}"

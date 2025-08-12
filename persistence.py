@@ -4,9 +4,9 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from pathlib import Path
 
-import chromadb
-from chromadb.config import Settings
-#from langchain_community.vectorstores import Chroma
+# import chromadb
+# from chromadb.config import Settings
+# from langchain_community.vectorstores import Chroma
 from langchain_chroma import Chroma
 from langchain.schema import Document
 from langchain_community.vectorstores.utils import filter_complex_metadata
@@ -27,7 +27,7 @@ class PersistenceManager:
         self.embedding_model = embedding_model
 
         # DO NOT create ChromaDB client here to avoid conflicts
-        # Instead, we'll use only Langchain Chroma wrappers
+        # Instead, use only Langchain Chroma wrappers
         self.chroma_client = None
 
     def _generate_collection_id(self, paper_data: Dict) -> str:
@@ -234,7 +234,6 @@ class PersistenceManager:
     def cleanup_orphaned_files(self):
         """Limpiar archivos huérfanos y colecciones sin metadata"""
         try:
-            # Since we're not using direct ChromaDB client, we'll focus on metadata cleanup
             # This is a simplified cleanup that removes metadata files without corresponding collections
             
             st.info("🧹 Iniciando limpieza de archivos huérfanos...")
